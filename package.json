@@ -1,0 +1,61 @@
+{
+  "name": "quickjs-wasi-reactor",
+  "version": "0.0.1",
+  "description": "JavaScript harness for QuickJS-NG WASI reactor model",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "qjs-wasi.wasm"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsgo --noEmit",
+    "lint": "eslint ./src",
+    "format": "prettier --write src",
+    "update-wasm": "./update-quickjs.bash",
+    "release": "npm run release:version && npm run release:commit",
+    "release:minor": "npm run release:version:minor && npm run release:commit",
+    "release:version": "npm version patch -m \"release: v%s\" --no-git-tag-version",
+    "release:version:minor": "npm version minor -m \"release: v%s\" --no-git-tag-version",
+    "release:commit": "git reset && git add package.json && git commit -s -m \"release: v$(node -p \"require('./package.json').version\")\" && git tag v$(node -p \"require('./package.json').version\")",
+    "release:publish": "git push && git push --tags && npm run build && npm publish"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aperturerobotics/js-quickjs-wasi-reactor.git"
+  },
+  "keywords": [
+    "quickjs",
+    "wasi",
+    "wasm",
+    "javascript",
+    "reactor"
+  ],
+  "author": "Aperture Robotics",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/aperturerobotics/js-quickjs-wasi-reactor/issues"
+  },
+  "homepage": "https://github.com/aperturerobotics/js-quickjs-wasi-reactor#readme",
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@typescript/native-preview": "^7.0.0-dev.20260106.1",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.0.0",
+    "typescript": "^5.0.0",
+    "typescript-eslint": "^8.52.0",
+    "vitest": "^2.0.0"
+  }
+}
