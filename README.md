@@ -1,5 +1,7 @@
 # js-quickjs-wasi-reactor
 
+[![NPM Version](https://img.shields.io/npm/v/quickjs-wasi-reactor)](https://www.npmjs.com/package/quickjs-wasi-reactor)
+
 > JavaScript/TypeScript harness for running QuickJS-NG in WASI reactor mode
 
 This package provides a JavaScript/TypeScript implementation for running QuickJS-NG compiled to WebAssembly using the WASI reactor model. It includes a complete browser-compatible WASI shim and high-level API for JavaScript execution.
