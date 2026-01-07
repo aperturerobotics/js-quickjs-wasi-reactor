@@ -11,7 +11,7 @@ const wasmModule = new WebAssembly.Module(wasmBuffer);
 describe("QuickJS", () => {
   it("should initialize and destroy", () => {
     const qjs = createQuickJS(wasmModule);
-    qjs.initArgv();
+    qjs.init();
     qjs.destroy();
   });
 
@@ -20,7 +20,7 @@ describe("QuickJS", () => {
     const qjs = createQuickJS(wasmModule, {
       stdout: (line) => output.push(line),
     });
-    qjs.initArgv();
+    qjs.init();
     qjs.eval(`console.log("Hello, World!")`);
     qjs.runLoopSync();
     qjs.destroy();
@@ -33,7 +33,7 @@ describe("QuickJS", () => {
     const qjs = createQuickJS(wasmModule, {
       stdout: (line) => output.push(line),
     });
-    qjs.initArgv();
+    qjs.initStdModule();
     qjs.eval(`
       console.log("before");
       os.setTimeout(() => console.log("timer"), 10);
@@ -54,7 +54,7 @@ describe("QuickJS", () => {
     const qjs = createQuickJS(wasmModule, {
       stdout: (line) => output.push(line),
     });
-    qjs.initArgv();
+    qjs.init();
     qjs.eval(
       `
       const msg = "Module works!";
@@ -76,7 +76,7 @@ describe("QuickJS", () => {
       stdout: (line) => output.push(line),
       fs,
     });
-    qjs.initArgv();
+    qjs.initStdModule();
     qjs.eval(`
       const content = std.loadFile("test.txt");
       console.log("File:", content);
@@ -96,7 +96,7 @@ describe("QuickJS", () => {
       stdout: (line) => stdout.push(line),
       stderr: (line) => stderr.push(line),
     });
-    qjs.initArgv();
+    qjs.initStdModule();
     // In QuickJS, console.error writes to stderr through std.err
     qjs.eval(`
       console.log("to stdout");
@@ -115,7 +115,7 @@ describe("QuickJS", () => {
     const qjs = createQuickJS(wasmModule, {
       stdout: (line) => output.push(line),
     });
-    qjs.initArgv();
+    qjs.init();
     qjs.eval(`
       Promise.resolve().then(() => console.log("promise resolved"));
       console.log("sync");

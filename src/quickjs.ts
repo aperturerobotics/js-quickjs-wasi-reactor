@@ -13,42 +13,61 @@ import {
 } from "./fs-mem.js";
 import type { Fd } from "./fd.js";
 
-/** Loop result constants from qjs_loop_once() */
+/** Loop result constants from js_std_loop_once() */
 export const LOOP_IDLE = -1;
 export const LOOP_ERROR = -2;
 
-/** QuickJS reactor exports interface */
+/** JS_EVAL flags */
+const JS_EVAL_TYPE_GLOBAL = 0;
+const JS_EVAL_TYPE_MODULE = 1;
+
+/** JSValue tag constants */
+const JS_TAG_EXCEPTION = 6;
+
+/** QuickJS reactor exports interface - raw C API */
 export interface QuickJSReactorExports {
   /** Standard WASI reactor initialization */
   _initialize(): void;
   /** WebAssembly memory */
   memory: WebAssembly.Memory;
-  /** Initialize with CLI arguments */
-  qjs_init_argv(argc: number, argv: number): number;
-  /** Initialize empty runtime */
-  qjs_init(): number;
-  /** Evaluate JavaScript code */
-  qjs_eval(
-    code: number,
-    len: number,
-    filename: number,
-    is_module: number,
-  ): number;
-  /** Run one iteration of the event loop */
-  qjs_loop_once(): number;
-  /** Poll for I/O events */
-  qjs_poll_io(timeout_ms: number): number;
-  /** Cleanup runtime */
-  qjs_destroy(): void;
-  /** Allocate memory */
+
+  // Memory management
   malloc(size: number): number;
-  /** Free memory */
   free(ptr: number): void;
+
+  // Core runtime
+  JS_NewRuntime(): number;
+  JS_FreeRuntime(rt: number): void;
+  JS_NewContext(rt: number): number;
+  JS_FreeContext(ctx: number): void;
+
+  // Evaluation - returns JSValue as bigint (i64)
+  JS_Eval(
+    ctx: number,
+    input: number,
+    input_len: number,
+    filename: number,
+    eval_flags: number,
+  ): bigint;
+
+  // Value management
+  JS_FreeValue(ctx: number, val: bigint): void;
+
+  // Standard library
+  js_init_module_std(ctx: number, module_name: number): number;
+  js_init_module_os(ctx: number, module_name: number): number;
+  js_init_module_bjson(ctx: number, module_name: number): number;
+  js_std_init_handlers(rt: number): void;
+  js_std_free_handlers(rt: number): void;
+  js_std_add_helpers(ctx: number, argc: number, argv: number): void;
+  js_std_loop_once(ctx: number): number;
+  js_std_poll_io(ctx: number, timeout_ms: number): number;
+  js_std_dump_error(ctx: number): void;
 }
 
 /** Options for creating a QuickJS instance */
 export interface QuickJSOptions {
-  /** WASI arguments (default: ['qjs', '--std']) */
+  /** WASI arguments (default: ['qjs']) */
   args?: string[];
   /** Environment variables as key=value strings */
   env?: string[];
@@ -77,8 +96,12 @@ export class QuickJS {
   private exitCode = 0;
   private stdin: PollableStdin;
 
+  // Runtime state
+  private rtPtr = 0;
+  private ctxPtr = 0;
+
   constructor(wasmModule: WebAssembly.Module, options: QuickJSOptions = {}) {
-    const args = options.args ?? ["qjs", "--std"];
+    const args = options.args ?? ["qjs"];
     const env = options.env ?? [];
     const debug = options.debug ?? false;
 
@@ -127,48 +150,129 @@ export class QuickJS {
     );
   }
 
-  /**
-   * Initialize QuickJS with command-line arguments.
-   * The args should match the WASI args passed to the constructor.
-   */
-  initArgv(): void {
+  /** Allocate a null-terminated string in WASM memory */
+  private allocString(s: string): number {
     if (!this.exports) throw new Error("QuickJS not initialized");
+    const bytes = new TextEncoder().encode(s);
+    const ptr = this.exports.malloc(bytes.length + 1);
+    if (ptr === 0) throw new Error("malloc failed");
+    const memory = new Uint8Array(this.exports.memory.buffer);
+    memory.set(bytes, ptr);
+    memory[ptr + bytes.length] = 0;
+    return ptr;
+  }
 
-    const args = this.wasi.args;
-    const memory = this.exports.memory;
-    const encoder = new TextEncoder();
-
-    // Allocate space for argv array and strings
-    const ARGV_BASE = 65536;
-    const STRINGS_BASE = ARGV_BASE + args.length * 4 + 4;
-
-    const view = new DataView(memory.buffer);
-    const bytes = new Uint8Array(memory.buffer);
-
-    let stringOffset = STRINGS_BASE;
-    for (let i = 0; i < args.length; i++) {
-      view.setUint32(ARGV_BASE + i * 4, stringOffset, true);
-      const encoded = encoder.encode(args[i]);
-      bytes.set(encoded, stringOffset);
-      bytes[stringOffset + encoded.length] = 0;
-      stringOffset += encoded.length + 1;
-    }
-    view.setUint32(ARGV_BASE + args.length * 4, 0, true);
-
-    const result = this.exports.qjs_init_argv(args.length, ARGV_BASE);
-    if (result !== 0) {
-      throw new Error(`qjs_init_argv failed with code ${result}`);
+  /** Free a pointer */
+  private freePtr(ptr: number): void {
+    if (ptr !== 0 && this.exports) {
+      this.exports.free(ptr);
     }
   }
 
+  /** Check if a JSValue is an exception */
+  private isException(val: bigint): boolean {
+    const tag = Number(val >> 32n);
+    return tag === JS_TAG_EXCEPTION;
+  }
+
   /**
-   * Initialize QuickJS with an empty context.
+   * Initialize QuickJS runtime and context.
    */
   init(): void {
     if (!this.exports) throw new Error("QuickJS not initialized");
-    const result = this.exports.qjs_init();
-    if (result !== 0) {
-      throw new Error(`qjs_init failed with code ${result}`);
+
+    // Create runtime
+    this.rtPtr = this.exports.JS_NewRuntime();
+    if (this.rtPtr === 0) {
+      throw new Error("JS_NewRuntime failed");
+    }
+
+    // Initialize std handlers
+    this.exports.js_std_init_handlers(this.rtPtr);
+
+    // Create context
+    this.ctxPtr = this.exports.JS_NewContext(this.rtPtr);
+    if (this.ctxPtr === 0) {
+      this.exports.js_std_free_handlers(this.rtPtr);
+      this.exports.JS_FreeRuntime(this.rtPtr);
+      this.rtPtr = 0;
+      throw new Error("JS_NewContext failed");
+    }
+
+    // Initialize std modules
+    const stdName = this.allocString("qjs:std");
+    this.exports.js_init_module_std(this.ctxPtr, stdName);
+    this.freePtr(stdName);
+
+    const osName = this.allocString("qjs:os");
+    this.exports.js_init_module_os(this.ctxPtr, osName);
+    this.freePtr(osName);
+
+    const bjsonName = this.allocString("qjs:bjson");
+    this.exports.js_init_module_bjson(this.ctxPtr, bjsonName);
+    this.freePtr(bjsonName);
+
+    // Add std helpers (console.log, print, etc.)
+    this.exports.js_std_add_helpers(this.ctxPtr, 0, 0);
+  }
+
+  /**
+   * Initialize QuickJS and import std modules as globals.
+   * This makes std, os, and bjson available as global objects.
+   */
+  initStdModule(): void {
+    this.init();
+
+    // Import and expose std modules globally
+    const code = `import * as bjson from 'qjs:bjson';
+import * as std from 'qjs:std';
+import * as os from 'qjs:os';
+globalThis.bjson = bjson;
+globalThis.std = std;
+globalThis.os = os;
+`;
+    this.eval(code, true);
+  }
+
+  /**
+   * Initialize QuickJS with command-line arguments.
+   * Sets up scriptArgs for the JavaScript code.
+   */
+  initArgv(args: string[]): void {
+    if (!this.exports) throw new Error("QuickJS not initialized");
+
+    this.init();
+
+    if (args.length > 0) {
+      // Allocate argv strings
+      const argPtrs: number[] = [];
+      for (const arg of args) {
+        argPtrs.push(this.allocString(arg));
+      }
+
+      // Allocate argv array
+      const argvPtr = this.exports.malloc(args.length * 4);
+      if (argvPtr === 0) {
+        for (const ptr of argPtrs) {
+          this.freePtr(ptr);
+        }
+        throw new Error("malloc failed for argv");
+      }
+
+      // Write argv pointers
+      const view = new DataView(this.exports.memory.buffer);
+      for (let i = 0; i < argPtrs.length; i++) {
+        view.setUint32(argvPtr + i * 4, argPtrs[i], true);
+      }
+
+      // Call js_std_add_helpers with argv
+      this.exports.js_std_add_helpers(this.ctxPtr, args.length, argvPtr);
+
+      // Free argv
+      this.freePtr(argvPtr);
+      for (const ptr of argPtrs) {
+        this.freePtr(ptr);
+      }
     }
   }
 
@@ -179,47 +283,40 @@ export class QuickJS {
    * @param filename Optional filename for error messages
    */
   eval(code: string, isModule = false, filename = "<eval>"): void {
-    if (!this.exports) throw new Error("QuickJS not initialized");
-
-    const codeBytes = new TextEncoder().encode(code);
-    const filenameBytes = new TextEncoder().encode(filename);
-
-    // Allocate memory for code
-    const codePtr = this.exports.malloc(codeBytes.length + 1);
-    if (codePtr === 0) throw new Error("malloc failed for code");
-
-    // Allocate memory for filename
-    const filenamePtr = this.exports.malloc(filenameBytes.length + 1);
-    if (filenamePtr === 0) {
-      this.exports.free(codePtr);
-      throw new Error("malloc failed for filename");
+    if (!this.exports || this.ctxPtr === 0) {
+      throw new Error("QuickJS not initialized");
     }
 
-    const memory = new Uint8Array(this.exports.memory.buffer);
+    // Allocate code string (with null terminator)
+    const codePtr = this.allocString(code);
 
-    // Write code with null terminator
-    memory.set(codeBytes, codePtr);
-    memory[codePtr + codeBytes.length] = 0;
+    // Allocate filename string
+    const filenamePtr = this.allocString(filename);
 
-    // Write filename with null terminator
-    memory.set(filenameBytes, filenamePtr);
-    memory[filenamePtr + filenameBytes.length] = 0;
+    // Determine eval flags
+    const evalFlags = isModule ? JS_EVAL_TYPE_MODULE : JS_EVAL_TYPE_GLOBAL;
 
-    // Call qjs_eval
-    const result = this.exports.qjs_eval(
+    // Call JS_Eval
+    const result = this.exports.JS_Eval(
+      this.ctxPtr,
       codePtr,
-      codeBytes.length,
+      code.length,
       filenamePtr,
-      isModule ? 1 : 0,
+      evalFlags,
     );
 
     // Free allocated memory
-    this.exports.free(codePtr);
-    this.exports.free(filenamePtr);
+    this.freePtr(codePtr);
+    this.freePtr(filenamePtr);
 
-    if (result !== 0) {
-      throw new Error("eval failed");
+    // Check for exception
+    if (this.isException(result)) {
+      this.exports.js_std_dump_error(this.ctxPtr);
+      throw new Error("JavaScript exception");
     }
+
+    // Free the result value
+    this.exports.JS_FreeValue(this.ctxPtr, result);
   }
 
   /**
@@ -227,10 +324,12 @@ export class QuickJS {
    * @returns Loop result: >0 = timer ms, 0 = more work, -1 = idle, -2 = error
    */
   loopOnce(): number {
-    if (!this.exports) throw new Error("QuickJS not initialized");
+    if (!this.exports || this.ctxPtr === 0) {
+      throw new Error("QuickJS not initialized");
+    }
 
     try {
-      return this.exports.qjs_loop_once();
+      return this.exports.js_std_loop_once(this.ctxPtr);
     } catch (e) {
       if (e instanceof WASIProcExit) {
         this.running = false;
@@ -246,10 +345,12 @@ export class QuickJS {
    * @param timeoutMs Poll timeout in milliseconds (0 = non-blocking)
    */
   pollIO(timeoutMs = 0): number {
-    if (!this.exports) throw new Error("QuickJS not initialized");
+    if (!this.exports || this.ctxPtr === 0) {
+      throw new Error("QuickJS not initialized");
+    }
 
     try {
-      return this.exports.qjs_poll_io(timeoutMs);
+      return this.exports.js_std_poll_io(this.ctxPtr, timeoutMs);
     } catch (e) {
       if (e instanceof WASIProcExit) {
         this.running = false;
@@ -377,7 +478,15 @@ export class QuickJS {
    */
   destroy(): void {
     if (this.exports) {
-      this.exports.qjs_destroy();
+      if (this.ctxPtr !== 0) {
+        this.exports.JS_FreeContext(this.ctxPtr);
+        this.ctxPtr = 0;
+      }
+      if (this.rtPtr !== 0) {
+        this.exports.js_std_free_handlers(this.rtPtr);
+        this.exports.JS_FreeRuntime(this.rtPtr);
+        this.rtPtr = 0;
+      }
     }
     this.stdin.close();
   }

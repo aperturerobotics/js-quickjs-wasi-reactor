@@ -31,8 +31,8 @@ import { loadQuickJS, buildFileSystem } from 'quickjs-wasi-reactor'
 // Load QuickJS from a URL or buffer
 const qjs = await loadQuickJS('/path/to/qjs-wasi.wasm')
 
-// Initialize with std module
-qjs.initArgv()
+// Initialize with std module (provides std, os, bjson globals)
+qjs.initStdModule()
 
 // Evaluate JavaScript code
 qjs.eval(`console.log("Hello from QuickJS!")`)
@@ -42,6 +42,24 @@ await qjs.runLoop()
 
 // Cleanup
 qjs.destroy()
+```
+
+### Initialization Options
+
+There are three ways to initialize QuickJS:
+
+```typescript
+// Option 1: init() - Basic runtime with std modules available for import
+qjs.init()
+qjs.eval(`import * as std from 'qjs:std'; std.printf("Hello\\n")`, true)
+
+// Option 2: initStdModule() - Like init() but also exposes std, os, bjson as globals
+qjs.initStdModule()
+qjs.eval(`std.printf("Hello\\n")`)  // std is already global
+
+// Option 3: initArgv(args) - Like init() but sets up scriptArgs
+qjs.initArgv(['qjs', 'script.js', '--verbose'])
+qjs.eval(`console.log(scriptArgs)`)  // ['qjs', 'script.js', '--verbose']
 ```
 
 ### With Virtual Filesystem
@@ -57,12 +75,13 @@ const fs = buildFileSystem(
   ]),
 )
 
-const qjs = await loadQuickJS('/path/to/qjs-wasi.wasm', {
-  args: ['qjs', '--std', 'script.js'],
-  fs,
-})
+const qjs = await loadQuickJS('/path/to/qjs-wasi.wasm', { fs })
 
-qjs.initArgv()
+qjs.initStdModule()
+qjs.eval(`
+  import { greet } from './lib/utils.js'
+  console.log(greet('World'))
+`, true)
 await qjs.runLoop()
 qjs.destroy()
 ```
@@ -145,13 +164,20 @@ Create a QuickJS instance from a pre-compiled WebAssembly module.
 
 ### `QuickJS` Methods
 
-#### `initArgv()`
-
-Initialize QuickJS with command-line arguments. Call this after creating the instance.
-
 #### `init()`
 
-Initialize QuickJS with an empty context (without loading scripts via args).
+Initialize QuickJS runtime and context with std modules available for import.
+Modules `qjs:std`, `qjs:os`, and `qjs:bjson` can be imported in evaluated code.
+
+#### `initStdModule()`
+
+Like `init()` but also exposes `std`, `os`, and `bjson` as global objects.
+Convenient for REPL-style usage where you want immediate access to std library.
+
+#### `initArgv(args)`
+
+Like `init()` but also sets up `scriptArgs` global with the provided arguments.
+Use this when your JavaScript code needs to access command-line arguments.
 
 #### `eval(code, isModule?, filename?)`
 
@@ -217,17 +243,28 @@ const fs = buildFileSystem(
 
 ## Reactor Model
 
-Unlike the standard WASI "command" model that blocks in `_start()`, the reactor model exports functions that the host calls:
+Unlike the standard WASI "command" model that blocks in `_start()`, the reactor model exports the raw QuickJS C API functions that the host calls directly:
 
-- `qjs_init()` - Initialize empty runtime
-- `qjs_init_argv(argc, argv)` - Initialize with CLI args
-- `qjs_eval(code, len, filename, is_module)` - Evaluate JS code
-- `qjs_loop_once()` - Run one event loop iteration
-- `qjs_poll_io(timeout_ms)` - Poll for I/O events
-- `qjs_destroy()` - Cleanup runtime
-- `malloc/free` - Memory allocation
+**Core Runtime:**
+- `JS_NewRuntime()` / `JS_FreeRuntime(rt)` - Create/destroy runtime
+- `JS_NewContext(rt)` / `JS_FreeContext(ctx)` - Create/destroy context
+- `JS_Eval(ctx, input, len, filename, flags)` - Evaluate JavaScript code
+- `JS_FreeValue(ctx, val)` - Free a JSValue
 
-This enables re-entrant execution in JavaScript host environments where blocking is not possible.
+**Standard Library:**
+- `js_std_init_handlers(rt)` / `js_std_free_handlers(rt)` - Initialize/cleanup std handlers
+- `js_init_module_std(ctx, name)` - Register qjs:std module
+- `js_init_module_os(ctx, name)` - Register qjs:os module  
+- `js_init_module_bjson(ctx, name)` - Register qjs:bjson module
+- `js_std_add_helpers(ctx, argc, argv)` - Add console.log, print, scriptArgs, etc.
+- `js_std_loop_once(ctx)` - Run one event loop iteration (non-blocking)
+- `js_std_poll_io(ctx, timeout_ms)` - Poll for I/O events
+- `js_std_dump_error(ctx)` - Dump exception to stderr
+
+**Memory:**
+- `malloc(size)` / `free(ptr)` - Memory allocation
+
+This enables re-entrant execution in JavaScript host environments where blocking is not possible. The raw C API also enables advanced use cases like multiple contexts, custom module loaders, and fine-grained resource control.
 
 ## License
 
