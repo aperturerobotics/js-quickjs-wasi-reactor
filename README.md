@@ -100,7 +100,7 @@ const qjs = await loadQuickJS('/path/to/qjs-wasi.wasm', {
   },
 })
 
-qjs.initArgv()
+qjs.init()
 qjs.eval(`console.log("This goes to custom stdout")`)
 await qjs.runLoop()
 qjs.destroy()
@@ -115,7 +115,7 @@ const stdin = new PollableStdin()
 
 const qjs = await loadQuickJS('/path/to/qjs-wasi.wasm', { stdin })
 
-qjs.initArgv()
+qjs.initStdModule()
 
 // Push data to stdin
 qjs.pushStdin(new TextEncoder().encode('Hello from stdin\n'))
@@ -123,6 +123,67 @@ qjs.pushStdin(new TextEncoder().encode('Hello from stdin\n'))
 // Run the loop - QuickJS can read from stdin
 await qjs.runLoop()
 qjs.destroy()
+```
+
+### Non-Blocking Event Loop Control
+
+For fine-grained control over JavaScript execution, use `loopOnce()` instead of `runLoop()`:
+
+```typescript
+import { loadQuickJS, LOOP_IDLE, LOOP_ERROR } from 'quickjs-wasi-reactor'
+
+const qjs = await loadQuickJS('/path/to/qjs-wasi.wasm')
+qjs.initStdModule()
+
+qjs.eval(`
+  os.setTimeout(() => console.log("timer fired"), 100)
+  console.log("scheduled timer")
+`)
+
+// Manual event loop - integrate with your own scheduling
+while (true) {
+  const result = qjs.loopOnce()
+  
+  if (result === LOOP_ERROR) throw new Error("JavaScript error")
+  if (result === LOOP_IDLE) break  // No more work
+  
+  if (result === 0) {
+    // More microtasks pending - yield to browser then continue
+    await new Promise(r => queueMicrotask(r))
+  } else if (result > 0) {
+    // Timer pending in N ms - do other work or wait
+    await new Promise(r => setTimeout(r, result))
+  }
+}
+
+qjs.destroy()
+```
+
+### Browser Integration with Animation Frames
+
+```typescript
+const qjs = await loadQuickJS('/path/to/qjs-wasi.wasm')
+qjs.initStdModule()
+
+qjs.eval(`
+  let frame = 0
+  function tick() {
+    console.log("Frame:", frame++)
+    if (frame < 60) os.setTimeout(tick, 16)
+  }
+  tick()
+`)
+
+// Cooperative scheduling with browser
+function runFrame() {
+  const result = qjs.loopOnce()
+  if (result >= 0) {
+    requestAnimationFrame(runFrame)
+  } else {
+    qjs.destroy()
+  }
+}
+requestAnimationFrame(runFrame)
 ```
 
 ## API
@@ -153,7 +214,7 @@ Create a QuickJS instance from a pre-compiled WebAssembly module.
 
 | Option     | Type                        | Default                   | Description                        |
 | ---------- | --------------------------- | ------------------------- | ---------------------------------- |
-| `args`     | `string[]`                  | `['qjs', '--std']`        | WASI command-line arguments        |
+| `args`     | `string[]`                  | `['qjs']`                 | WASI command-line arguments        |
 | `env`      | `string[]`                  | `[]`                      | Environment variables (key=value)  |
 | `debug`    | `boolean`                   | `false`                   | Enable WASI debug logging          |
 | `stdout`   | `(line: string) => void`    | `console.log`             | Custom stdout line handler         |
