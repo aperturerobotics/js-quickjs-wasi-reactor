@@ -13,8 +13,11 @@
     }
   },
   "files": [
+    "!**/*.tsbuildinfo",
     "dist",
-    "qjs-wasi.wasm"
+    "qjs-wasi.wasm",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc",
