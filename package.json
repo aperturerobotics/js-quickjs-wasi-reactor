@@ -15,6 +15,7 @@
   "files": [
     "!**/*.tsbuildinfo",
     "dist",
+    "src",
     "qjs-wasi.wasm",
     "README.md",
     "LICENSE"
