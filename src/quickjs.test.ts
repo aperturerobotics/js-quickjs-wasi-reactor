@@ -127,6 +127,61 @@ describe("QuickJS", () => {
     expect(output).toContain("sync");
     expect(output).toContain("promise resolved");
   });
+
+  it("should support dynamic import()", async () => {
+    const output: string[] = [];
+    const fs = buildFileSystem(
+      new Map([
+        ["lib.js", `export const greeting = "Hello from dynamic import!";`],
+      ]),
+    );
+
+    const qjs = createQuickJS(wasmModule, {
+      stdout: (line) => output.push(line),
+      fs,
+    });
+    qjs.init(["qjs", "--std"]);
+    qjs.eval(
+      `
+      async function main() {
+        const lib = await import('./lib.js');
+        console.log(lib.greeting);
+      }
+      main();
+    `,
+      true,
+    );
+    await qjs.runLoop();
+    qjs.destroy();
+
+    expect(output).toContain("Hello from dynamic import!");
+  });
+
+  it("should support static import from filesystem", () => {
+    const output: string[] = [];
+    const fs = buildFileSystem(
+      new Map([
+        ["utils.js", `export function greet(name) { return "Hi " + name; }`],
+      ]),
+    );
+
+    const qjs = createQuickJS(wasmModule, {
+      stdout: (line) => output.push(line),
+      fs,
+    });
+    qjs.init(["qjs", "--std"]);
+    qjs.eval(
+      `
+      import { greet } from './utils.js';
+      console.log(greet("World"));
+    `,
+      true,
+    );
+    qjs.runLoopSync();
+    qjs.destroy();
+
+    expect(output).toContain("Hi World");
+  });
 });
 
 describe("buildFileSystem", () => {
