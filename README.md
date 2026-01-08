@@ -190,33 +190,6 @@ function runFrame() {
 requestAnimationFrame(runFrame);
 ```
 
-### Browser Integration with Animation Frames
-
-```typescript
-const qjs = await loadQuickJS("/path/to/qjs-wasi.wasm");
-qjs.initStdModule();
-
-qjs.eval(`
-  let frame = 0
-  function tick() {
-    console.log("Frame:", frame++)
-    if (frame < 60) os.setTimeout(tick, 16)
-  }
-  tick()
-`);
-
-// Cooperative scheduling with browser
-function runFrame() {
-  const result = qjs.loopOnce();
-  if (result >= 0) {
-    requestAnimationFrame(runFrame);
-  } else {
-    qjs.destroy();
-  }
-}
-requestAnimationFrame(runFrame);
-```
-
 ## API
 
 ### `loadQuickJS(wasmSource, options?)`
