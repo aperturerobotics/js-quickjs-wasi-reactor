@@ -1,7 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createQuickJS, buildFileSystem } from "./quickjs.js";
+import { PollableStdin } from "./fs-mem.js";
 
 // Load the WASM module once for all tests
 const wasmPath = join(import.meta.dirname, "..", "qjs-wasi.wasm");
@@ -143,5 +144,101 @@ describe("buildFileSystem", () => {
   it("should handle empty paths", () => {
     const fs = buildFileSystem(new Map([["file.txt", "content"]]));
     expect(fs.has("file.txt")).toBe(true);
+  });
+});
+
+describe("PollableStdin", () => {
+  it("should invoke wakeCallback when data is pushed", () => {
+    const stdin = new PollableStdin();
+    const wakeCallback = vi.fn();
+
+    stdin.onWake(wakeCallback);
+    expect(wakeCallback).not.toHaveBeenCalled();
+
+    stdin.push(new TextEncoder().encode("hello"));
+    expect(wakeCallback).toHaveBeenCalledTimes(1);
+
+    stdin.push(new TextEncoder().encode("world"));
+    expect(wakeCallback).toHaveBeenCalledTimes(2);
+  });
+
+  it("should invoke wakeCallback when stdin is closed", () => {
+    const stdin = new PollableStdin();
+    const wakeCallback = vi.fn();
+
+    stdin.onWake(wakeCallback);
+    expect(wakeCallback).not.toHaveBeenCalled();
+
+    stdin.close();
+    expect(wakeCallback).toHaveBeenCalledTimes(1);
+  });
+
+  it("should allow clearing the wakeCallback", () => {
+    const stdin = new PollableStdin();
+    const wakeCallback = vi.fn();
+
+    stdin.onWake(wakeCallback);
+    stdin.push(new TextEncoder().encode("hello"));
+    expect(wakeCallback).toHaveBeenCalledTimes(1);
+
+    stdin.onWake(null);
+    stdin.push(new TextEncoder().encode("world"));
+    expect(wakeCallback).toHaveBeenCalledTimes(1); // still 1, not called again
+  });
+
+  it("should not invoke wakeCallback when pushing to closed stdin", () => {
+    const stdin = new PollableStdin();
+    const wakeCallback = vi.fn();
+
+    stdin.close();
+    stdin.onWake(wakeCallback);
+
+    stdin.push(new TextEncoder().encode("ignored"));
+    expect(wakeCallback).not.toHaveBeenCalled();
+  });
+});
+
+describe("QuickJS.onStdinWake", () => {
+  it("should invoke callback when stdin data is pushed", () => {
+    const wakeCallback = vi.fn();
+    const qjs = createQuickJS(wasmModule);
+    qjs.init();
+
+    qjs.onStdinWake(wakeCallback);
+    expect(wakeCallback).not.toHaveBeenCalled();
+
+    qjs.pushStdin(new TextEncoder().encode("input data"));
+    expect(wakeCallback).toHaveBeenCalledTimes(1);
+
+    qjs.destroy();
+  });
+
+  it("should invoke callback when instance is destroyed (stdin closed)", () => {
+    const wakeCallback = vi.fn();
+    const qjs = createQuickJS(wasmModule);
+    qjs.init();
+
+    qjs.onStdinWake(wakeCallback);
+    expect(wakeCallback).not.toHaveBeenCalled();
+
+    // destroy() internally closes stdin, which should trigger the callback
+    qjs.destroy();
+    expect(wakeCallback).toHaveBeenCalledTimes(1);
+  });
+
+  it("should allow clearing the callback", () => {
+    const wakeCallback = vi.fn();
+    const qjs = createQuickJS(wasmModule);
+    qjs.init();
+
+    qjs.onStdinWake(wakeCallback);
+    qjs.pushStdin(new TextEncoder().encode("first"));
+    expect(wakeCallback).toHaveBeenCalledTimes(1);
+
+    qjs.onStdinWake(null);
+    qjs.pushStdin(new TextEncoder().encode("second"));
+    expect(wakeCallback).toHaveBeenCalledTimes(1); // still 1
+
+    qjs.destroy();
   });
 });

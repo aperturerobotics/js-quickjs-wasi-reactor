@@ -376,6 +376,14 @@ globalThis.os = os;
   }
 
   /**
+   * Set callback to be invoked when stdin data is pushed or stdin is closed.
+   * Used by the host to wake the event loop when I/O is available.
+   */
+  onStdinWake(cb: (() => void) | null): void {
+    this.stdin.onWake(cb);
+  }
+
+  /**
    * Run the event loop until idle or stopped.
    * This method is designed for browser environments and yields to the event loop.
    * @param onTick Optional callback called on each loop iteration

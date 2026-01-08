@@ -745,6 +745,7 @@ export class PollableStdin extends Fd {
   private buffer: Uint8Array[] = [];
   private bufferSize = 0;
   private closed = false;
+  private wakeCallback: (() => void) | null = null;
 
   constructor() {
     super();
@@ -756,11 +757,18 @@ export class PollableStdin extends Fd {
     if (this.closed) return;
     this.buffer.push(data);
     this.bufferSize += data.byteLength;
+    this.wakeCallback?.();
   }
 
   /** Close stdin (future reads will return EOF) */
   close() {
     this.closed = true;
+    this.wakeCallback?.();
+  }
+
+  /** Set callback to be invoked when data is pushed or stdin is closed */
+  onWake(cb: (() => void) | null) {
+    this.wakeCallback = cb;
   }
 
   /** Check if data is available */
