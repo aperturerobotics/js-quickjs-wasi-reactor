@@ -34,7 +34,7 @@ describe("QuickJS", () => {
     const qjs = createQuickJS(wasmModule, {
       stdout: (line) => output.push(line),
     });
-    qjs.initStdModule();
+    qjs.init(["qjs", "--std"]);
     qjs.eval(`
       console.log("before");
       os.setTimeout(() => console.log("timer"), 10);
@@ -77,7 +77,7 @@ describe("QuickJS", () => {
       stdout: (line) => output.push(line),
       fs,
     });
-    qjs.initStdModule();
+    qjs.init(["qjs", "--std"]);
     qjs.eval(`
       const content = std.loadFile("test.txt");
       console.log("File:", content);
@@ -97,7 +97,7 @@ describe("QuickJS", () => {
       stdout: (line) => stdout.push(line),
       stderr: (line) => stderr.push(line),
     });
-    qjs.initStdModule();
+    qjs.init(["qjs", "--std"]);
     // In QuickJS, console.error writes to stderr through std.err
     qjs.eval(`
       console.log("to stdout");

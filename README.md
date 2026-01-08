@@ -26,103 +26,107 @@ bun add quickjs-wasi-reactor
 ### Basic Usage
 
 ```typescript
-import { loadQuickJS, buildFileSystem } from 'quickjs-wasi-reactor'
+import { loadQuickJS, buildFileSystem } from "quickjs-wasi-reactor";
 
 // Load QuickJS from a URL or buffer
-const qjs = await loadQuickJS('/path/to/qjs-wasi.wasm')
+const qjs = await loadQuickJS("/path/to/qjs-wasi.wasm");
 
-// Initialize with std module (provides std, os, bjson globals)
-qjs.initStdModule()
+// Initialize with --std flag (provides std, os, bjson globals)
+qjs.init(["qjs", "--std"]);
 
 // Evaluate JavaScript code
-qjs.eval(`console.log("Hello from QuickJS!")`)
+qjs.eval(`console.log("Hello from QuickJS!")`);
 
 // Run the event loop
-await qjs.runLoop()
+await qjs.runLoop();
 
 // Cleanup
-qjs.destroy()
+qjs.destroy();
 ```
 
 ### Initialization Options
 
-There are three ways to initialize QuickJS:
-
 ```typescript
-// Option 1: init() - Basic runtime with std modules available for import
-qjs.init()
-qjs.eval(`import * as std from 'qjs:std'; std.printf("Hello\\n")`, true)
+// Basic runtime with std modules available for import
+qjs.init();
+qjs.eval(`import * as std from 'qjs:std'; std.printf("Hello\\n")`, true);
 
-// Option 2: initStdModule() - Like init() but also exposes std, os, bjson as globals
-qjs.initStdModule()
-qjs.eval(`std.printf("Hello\\n")`)  // std is already global
+// With --std flag to expose std, os, bjson as globals
+qjs.init(["qjs", "--std"]);
+qjs.eval(`std.printf("Hello\\n")`); // std is already global
 
-// Option 3: initArgv(args) - Like init() but sets up scriptArgs
-qjs.initArgv(['qjs', 'script.js', '--verbose'])
-qjs.eval(`console.log(scriptArgs)`)  // ['qjs', 'script.js', '--verbose']
+// With script args accessible via scriptArgs global
+qjs.init(["qjs", "script.js", "--verbose"]);
+qjs.eval(`console.log(scriptArgs)`); // ['qjs', 'script.js', '--verbose']
 ```
 
 ### With Virtual Filesystem
 
 ```typescript
-import { loadQuickJS, buildFileSystem } from 'quickjs-wasi-reactor'
+import { loadQuickJS, buildFileSystem } from "quickjs-wasi-reactor";
 
 // Build a virtual filesystem
 const fs = buildFileSystem(
   new Map([
-    ['script.js', 'console.log("Hello from script!")'],
-    ['lib/utils.js', 'export function greet(name) { return `Hello, ${name}!` }'],
+    ["script.js", 'console.log("Hello from script!")'],
+    [
+      "lib/utils.js",
+      "export function greet(name) { return `Hello, ${name}!` }",
+    ],
   ]),
-)
+);
 
-const qjs = await loadQuickJS('/path/to/qjs-wasi.wasm', { fs })
+const qjs = await loadQuickJS("/path/to/qjs-wasi.wasm", { fs });
 
-qjs.initStdModule()
-qjs.eval(`
+qjs.init(["qjs", "--std"]);
+qjs.eval(
+  `
   import { greet } from './lib/utils.js'
   console.log(greet('World'))
-`, true)
-await qjs.runLoop()
-qjs.destroy()
+`,
+  true,
+);
+await qjs.runLoop();
+qjs.destroy();
 ```
 
 ### Custom I/O Handlers
 
 ```typescript
-import { loadQuickJS } from 'quickjs-wasi-reactor'
+import { loadQuickJS } from "quickjs-wasi-reactor";
 
-const qjs = await loadQuickJS('/path/to/qjs-wasi.wasm', {
-  stdout: (line) => document.body.innerHTML += `<p>${line}</p>`,
-  stderr: (line) => console.error('Error:', line),
+const qjs = await loadQuickJS("/path/to/qjs-wasi.wasm", {
+  stdout: (line) => (document.body.innerHTML += `<p>${line}</p>`),
+  stderr: (line) => console.error("Error:", line),
   onDevOut: (data) => {
     // Handle binary data written to /dev/out
-    console.log('Received', data.length, 'bytes')
+    console.log("Received", data.length, "bytes");
   },
-})
+});
 
-qjs.init()
-qjs.eval(`console.log("This goes to custom stdout")`)
-await qjs.runLoop()
-qjs.destroy()
+qjs.init();
+qjs.eval(`console.log("This goes to custom stdout")`);
+await qjs.runLoop();
+qjs.destroy();
 ```
 
 ### Feeding Stdin Data
 
 ```typescript
-import { loadQuickJS, PollableStdin } from 'quickjs-wasi-reactor'
+import { loadQuickJS, PollableStdin } from "quickjs-wasi-reactor";
 
-const stdin = new PollableStdin()
+const stdin = new PollableStdin();
 
-const qjs = await loadQuickJS('/path/to/qjs-wasi.wasm', { stdin })
+const qjs = await loadQuickJS("/path/to/qjs-wasi.wasm", { stdin });
 
-qjs.initStdModule()
+qjs.init(["qjs", "--std"]);
 
 // Push data to stdin
-qjs.pushStdin(new TextEncoder().encode('Hello from stdin\n'))
+qjs.pushStdin(new TextEncoder().encode("Hello from stdin\n"));
 
 // Run the loop - QuickJS can read from stdin
-await qjs.runLoop()
-qjs.destroy()
+await qjs.runLoop();
+qjs.destroy();
 ```
 
 ### Non-Blocking Event Loop Control
@@ -130,40 +134,40 @@ qjs.destroy()
 For fine-grained control over JavaScript execution, use `loopOnce()` instead of `runLoop()`:
 
 ```typescript
-import { loadQuickJS, LOOP_IDLE, LOOP_ERROR } from 'quickjs-wasi-reactor'
+import { loadQuickJS, LOOP_IDLE, LOOP_ERROR } from "quickjs-wasi-reactor";
 
-const qjs = await loadQuickJS('/path/to/qjs-wasi.wasm')
-qjs.initStdModule()
+const qjs = await loadQuickJS("/path/to/qjs-wasi.wasm");
+qjs.init(["qjs", "--std"]);
 
 qjs.eval(`
   os.setTimeout(() => console.log("timer fired"), 100)
   console.log("scheduled timer")
-`)
+`);
 
 // Manual event loop - integrate with your own scheduling
 while (true) {
-  const result = qjs.loopOnce()
-  
-  if (result === LOOP_ERROR) throw new Error("JavaScript error")
-  if (result === LOOP_IDLE) break  // No more work
-  
+  const result = qjs.loopOnce();
+
+  if (result === LOOP_ERROR) throw new Error("JavaScript error");
+  if (result === LOOP_IDLE) break; // No more work
+
   if (result === 0) {
     // More microtasks pending - yield to browser then continue
-    await new Promise(r => queueMicrotask(r))
+    await new Promise((r) => queueMicrotask(r));
   } else if (result > 0) {
     // Timer pending in N ms - do other work or wait
-    await new Promise(r => setTimeout(r, result))
+    await new Promise((r) => setTimeout(r, result));
   }
 }
 
-qjs.destroy()
+qjs.destroy();
 ```
 
 ### Browser Integration with Animation Frames
 
 ```typescript
-const qjs = await loadQuickJS('/path/to/qjs-wasi.wasm')
-qjs.initStdModule()
+const qjs = await loadQuickJS("/path/to/qjs-wasi.wasm");
+qjs.init(["qjs", "--std"]);
 
 qjs.eval(`
   let frame = 0
@@ -172,18 +176,45 @@ qjs.eval(`
     if (frame < 60) os.setTimeout(tick, 16)
   }
   tick()
-`)
+`);
 
 // Cooperative scheduling with browser
 function runFrame() {
-  const result = qjs.loopOnce()
+  const result = qjs.loopOnce();
   if (result >= 0) {
-    requestAnimationFrame(runFrame)
+    requestAnimationFrame(runFrame);
   } else {
-    qjs.destroy()
+    qjs.destroy();
   }
 }
-requestAnimationFrame(runFrame)
+requestAnimationFrame(runFrame);
+```
+
+### Browser Integration with Animation Frames
+
+```typescript
+const qjs = await loadQuickJS("/path/to/qjs-wasi.wasm");
+qjs.initStdModule();
+
+qjs.eval(`
+  let frame = 0
+  function tick() {
+    console.log("Frame:", frame++)
+    if (frame < 60) os.setTimeout(tick, 16)
+  }
+  tick()
+`);
+
+// Cooperative scheduling with browser
+function runFrame() {
+  const result = qjs.loopOnce();
+  if (result >= 0) {
+    requestAnimationFrame(runFrame);
+  } else {
+    qjs.destroy();
+  }
+}
+requestAnimationFrame(runFrame);
 ```
 
 ## API
@@ -212,33 +243,31 @@ Create a QuickJS instance from a pre-compiled WebAssembly module.
 
 ### `QuickJSOptions`
 
-| Option     | Type                        | Default                   | Description                        |
-| ---------- | --------------------------- | ------------------------- | ---------------------------------- |
-| `args`     | `string[]`                  | `['qjs']`                 | WASI command-line arguments        |
-| `env`      | `string[]`                  | `[]`                      | Environment variables (key=value)  |
-| `debug`    | `boolean`                   | `false`                   | Enable WASI debug logging          |
-| `stdout`   | `(line: string) => void`    | `console.log`             | Custom stdout line handler         |
-| `stderr`   | `(line: string) => void`    | `console.error`           | Custom stderr line handler         |
-| `fs`       | `Map<string, File\|Dir>`    | `new Map()`               | Virtual filesystem root contents   |
-| `onDevOut` | `(data: Uint8Array) => void`| `undefined`               | Handler for /dev/out writes        |
-| `stdin`    | `PollableStdin`             | `new PollableStdin()`     | Custom stdin source                |
+| Option     | Type                         | Default               | Description                       |
+| ---------- | ---------------------------- | --------------------- | --------------------------------- |
+| `args`     | `string[]`                   | `['qjs']`             | WASI command-line arguments       |
+| `env`      | `string[]`                   | `[]`                  | Environment variables (key=value) |
+| `debug`    | `boolean`                    | `false`               | Enable WASI debug logging         |
+| `stdout`   | `(line: string) => void`     | `console.log`         | Custom stdout line handler        |
+| `stderr`   | `(line: string) => void`     | `console.error`       | Custom stderr line handler        |
+| `fs`       | `Map<string, File\|Dir>`     | `new Map()`           | Virtual filesystem root contents  |
+| `onDevOut` | `(data: Uint8Array) => void` | `undefined`           | Handler for /dev/out writes       |
+| `stdin`    | `PollableStdin`              | `new PollableStdin()` | Custom stdin source               |
 
 ### `QuickJS` Methods
 
-#### `init()`
+#### `init(args?)`
 
-Initialize QuickJS runtime and context with std modules available for import.
-Modules `qjs:std`, `qjs:os`, and `qjs:bjson` can be imported in evaluated code.
+Initialize QuickJS runtime and context. Modules `qjs:std`, `qjs:os`, and `qjs:bjson` can be imported in evaluated code.
 
-#### `initStdModule()`
+Pass `['qjs', '--std']` to expose `std`, `os`, and `bjson` as globals.
 
-Like `init()` but also exposes `std`, `os`, and `bjson` as global objects.
-Convenient for REPL-style usage where you want immediate access to std library.
+Supported flags:
 
-#### `initArgv(args)`
-
-Like `init()` but also sets up `scriptArgs` global with the provided arguments.
-Use this when your JavaScript code needs to access command-line arguments.
+- `--std` - Load std, os, bjson modules as globals
+- `-m, --module` - Treat script as ES module
+- `-e, --eval` - Evaluate expression
+- `-I, --include` - Include file before script
 
 #### `eval(code, isModule?, filename?)`
 
@@ -296,36 +325,38 @@ Build a virtual filesystem from a map of paths to content.
 ```typescript
 const fs = buildFileSystem(
   new Map([
-    ['path/to/file.js', 'content'],
-    ['another/file.txt', new Uint8Array([1, 2, 3])],
+    ["path/to/file.js", "content"],
+    ["another/file.txt", new Uint8Array([1, 2, 3])],
   ]),
-)
+);
 ```
 
 ## Reactor Model
 
-Unlike the standard WASI "command" model that blocks in `_start()`, the reactor model exports the raw QuickJS C API functions that the host calls directly:
+Unlike the standard WASI "command" model that blocks in `_start()`, the reactor model exports functions for re-entrant execution:
 
-**Core Runtime:**
-- `JS_NewRuntime()` / `JS_FreeRuntime(rt)` - Create/destroy runtime
-- `JS_NewContext(rt)` / `JS_FreeContext(ctx)` - Create/destroy context
+**Reactor Initialization (preferred):**
+
+- `qjs_init_argv(argc, argv)` - Initialize with CLI args (sets up module loader)
+- `qjs_get_context()` - Get JSContext\* for use with other APIs
+- `qjs_destroy()` - Cleanup reactor runtime
+
+**Evaluation:**
+
 - `JS_Eval(ctx, input, len, filename, flags)` - Evaluate JavaScript code
 - `JS_FreeValue(ctx, val)` - Free a JSValue
 
-**Standard Library:**
-- `js_std_init_handlers(rt)` / `js_std_free_handlers(rt)` - Initialize/cleanup std handlers
-- `js_init_module_std(ctx, name)` - Register qjs:std module
-- `js_init_module_os(ctx, name)` - Register qjs:os module  
-- `js_init_module_bjson(ctx, name)` - Register qjs:bjson module
-- `js_std_add_helpers(ctx, argc, argv)` - Add console.log, print, scriptArgs, etc.
+**Event Loop:**
+
 - `js_std_loop_once(ctx)` - Run one event loop iteration (non-blocking)
 - `js_std_poll_io(ctx, timeout_ms)` - Poll for I/O events
 - `js_std_dump_error(ctx)` - Dump exception to stderr
 
 **Memory:**
+
 - `malloc(size)` / `free(ptr)` - Memory allocation
 
-This enables re-entrant execution in JavaScript host environments where blocking is not possible. The raw C API also enables advanced use cases like multiple contexts, custom module loaders, and fine-grained resource control.
+This enables re-entrant execution in JavaScript host environments where blocking is not possible.
 
 ## License
 

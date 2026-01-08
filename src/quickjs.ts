@@ -35,11 +35,13 @@ export interface QuickJSReactorExports {
   malloc(size: number): number;
   free(ptr: number): void;
 
-  // Core runtime
-  JS_NewRuntime(): number;
-  JS_FreeRuntime(rt: number): void;
-  JS_NewContext(rt: number): number;
-  JS_FreeContext(ctx: number): void;
+  // Reactor initialization (preferred - sets up module loader)
+  qjs_init_argv(argc: number, argv: number): number;
+  qjs_get_context(): number;
+  qjs_destroy(): void;
+
+  // Core runtime (low-level, use qjs_init_argv instead)
+  JS_GetRuntime(ctx: number): number;
 
   // Evaluation - returns JSValue as bigint (i64)
   JS_Eval(
@@ -54,12 +56,6 @@ export interface QuickJSReactorExports {
   JS_FreeValue(ctx: number, val: bigint): void;
 
   // Standard library
-  js_init_module_std(ctx: number, module_name: number): number;
-  js_init_module_os(ctx: number, module_name: number): number;
-  js_init_module_bjson(ctx: number, module_name: number): number;
-  js_std_init_handlers(rt: number): void;
-  js_std_free_handlers(rt: number): void;
-  js_std_add_helpers(ctx: number, argc: number, argv: number): void;
   js_std_loop_once(ctx: number): number;
   js_std_poll_io(ctx: number, timeout_ms: number): number;
   js_std_dump_error(ctx: number): void;
@@ -176,104 +172,65 @@ export class QuickJS {
   }
 
   /**
-   * Initialize QuickJS runtime and context.
+   * Initialize QuickJS runtime and context with optional command-line arguments.
+   * Uses qjs_init_argv which sets up the module loader properly.
+   *
+   * @param args Optional CLI arguments. Pass ["qjs", "--std"] to load std/os/bjson as globals.
+   *
+   * Supported flags:
+   * - --std: Load std, os, bjson modules as globals
+   * - -m, --module: Treat script as ES module
+   * - -e, --eval: Evaluate expression
+   * - -I, --include: Include file before script
    */
-  init(): void {
+  init(args?: string[]): void {
     if (!this.exports) throw new Error("QuickJS not initialized");
+    if (this.ctxPtr !== 0) throw new Error("QuickJS already initialized");
 
-    // Create runtime
-    this.rtPtr = this.exports.JS_NewRuntime();
-    if (this.rtPtr === 0) {
-      throw new Error("JS_NewRuntime failed");
+    const actualArgs = args ?? ["qjs"];
+
+    // Allocate argv strings
+    const argPtrs: number[] = [];
+    for (const arg of actualArgs) {
+      argPtrs.push(this.allocString(arg));
     }
 
-    // Initialize std handlers
-    this.exports.js_std_init_handlers(this.rtPtr);
-
-    // Create context
-    this.ctxPtr = this.exports.JS_NewContext(this.rtPtr);
-    if (this.ctxPtr === 0) {
-      this.exports.js_std_free_handlers(this.rtPtr);
-      this.exports.JS_FreeRuntime(this.rtPtr);
-      this.rtPtr = 0;
-      throw new Error("JS_NewContext failed");
-    }
-
-    // Initialize std modules
-    const stdName = this.allocString("qjs:std");
-    this.exports.js_init_module_std(this.ctxPtr, stdName);
-    this.freePtr(stdName);
-
-    const osName = this.allocString("qjs:os");
-    this.exports.js_init_module_os(this.ctxPtr, osName);
-    this.freePtr(osName);
-
-    const bjsonName = this.allocString("qjs:bjson");
-    this.exports.js_init_module_bjson(this.ctxPtr, bjsonName);
-    this.freePtr(bjsonName);
-
-    // Add std helpers (console.log, print, etc.)
-    this.exports.js_std_add_helpers(this.ctxPtr, 0, 0);
-  }
-
-  /**
-   * Initialize QuickJS and import std modules as globals.
-   * This makes std, os, and bjson available as global objects.
-   */
-  initStdModule(): void {
-    this.init();
-
-    // Import and expose std modules globally
-    const code = `import * as bjson from 'qjs:bjson';
-import * as std from 'qjs:std';
-import * as os from 'qjs:os';
-globalThis.bjson = bjson;
-globalThis.std = std;
-globalThis.os = os;
-`;
-    this.eval(code, true);
-  }
-
-  /**
-   * Initialize QuickJS with command-line arguments.
-   * Sets up scriptArgs for the JavaScript code.
-   */
-  initArgv(args: string[]): void {
-    if (!this.exports) throw new Error("QuickJS not initialized");
-
-    this.init();
-
-    if (args.length > 0) {
-      // Allocate argv strings
-      const argPtrs: number[] = [];
-      for (const arg of args) {
-        argPtrs.push(this.allocString(arg));
-      }
-
-      // Allocate argv array
-      const argvPtr = this.exports.malloc(args.length * 4);
-      if (argvPtr === 0) {
-        for (const ptr of argPtrs) {
-          this.freePtr(ptr);
-        }
-        throw new Error("malloc failed for argv");
-      }
-
-      // Write argv pointers
-      const view = new DataView(this.exports.memory.buffer);
-      for (let i = 0; i < argPtrs.length; i++) {
-        view.setUint32(argvPtr + i * 4, argPtrs[i], true);
-      }
-
-      // Call js_std_add_helpers with argv
-      this.exports.js_std_add_helpers(this.ctxPtr, args.length, argvPtr);
-
-      // Free argv
-      this.freePtr(argvPtr);
+    // Allocate argv array
+    const argvPtr = this.exports.malloc(actualArgs.length * 4);
+    if (argvPtr === 0) {
       for (const ptr of argPtrs) {
         this.freePtr(ptr);
       }
+      throw new Error("malloc failed for argv");
     }
+
+    // Write argv pointers
+    const view = new DataView(this.exports.memory.buffer);
+    for (let i = 0; i < argPtrs.length; i++) {
+      view.setUint32(argvPtr + i * 4, argPtrs[i], true);
+    }
+
+    // Call qjs_init_argv
+    const result = this.exports.qjs_init_argv(actualArgs.length, argvPtr);
+
+    // Free argv memory
+    this.freePtr(argvPtr);
+    for (const ptr of argPtrs) {
+      this.freePtr(ptr);
+    }
+
+    if (result !== 0) {
+      throw new Error("qjs_init_argv failed");
+    }
+
+    // Get the context pointer
+    this.ctxPtr = this.exports.qjs_get_context();
+    if (this.ctxPtr === 0) {
+      throw new Error("qjs_get_context returned null");
+    }
+
+    // Get the runtime pointer
+    this.rtPtr = this.exports.JS_GetRuntime(this.ctxPtr);
   }
 
   /**
@@ -485,16 +442,10 @@ globalThis.os = os;
    * Destroy the QuickJS runtime and release resources.
    */
   destroy(): void {
-    if (this.exports) {
-      if (this.ctxPtr !== 0) {
-        this.exports.JS_FreeContext(this.ctxPtr);
-        this.ctxPtr = 0;
-      }
-      if (this.rtPtr !== 0) {
-        this.exports.js_std_free_handlers(this.rtPtr);
-        this.exports.JS_FreeRuntime(this.rtPtr);
-        this.rtPtr = 0;
-      }
+    if (this.exports && this.ctxPtr !== 0) {
+      this.exports.qjs_destroy();
+      this.ctxPtr = 0;
+      this.rtPtr = 0;
     }
     this.stdin.close();
   }
