@@ -1,0 +1,78 @@
+name: Update QuickJS
+
+on:
+  schedule:
+    # Check daily at 06:00 UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          # A PAT is required for the tag push to trigger the release workflow.
+          # Falls back to GITHUB_TOKEN (release workflow won't be triggered).
+          token: ${{ secrets.PAT || github.token }}
+
+      - name: Check for new upstream release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          CURRENT=$(grep "VERSION = " src/version.ts | sed "s/.*'\(.*\)'/\1/")
+          LATEST=$(gh release view --repo quickjs-ng/quickjs --json tagName --jq '.tagName')
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+          if [ "$CURRENT" = "$LATEST" ]; then
+            echo "Already up to date ($CURRENT)"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version available: $CURRENT -> $LATEST"
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update QuickJS WASM
+        if: steps.check.outputs.updated == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./update-quickjs.bash "${{ steps.check.outputs.latest }}"
+
+      - name: Update package.json version
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          # Strip leading 'v' from tag for npm version
+          VERSION="${{ steps.check.outputs.latest }}"
+          VERSION="${VERSION#v}"
+          npm version "$VERSION" --no-git-tag-version
+
+      - name: Setup Bun
+        if: steps.check.outputs.updated == 'true'
+        uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2.1.2
+
+      - name: Install and test
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          bun install
+          bun run build
+          bun run test
+
+      - name: Commit and tag
+        if: steps.check.outputs.updated == 'true'
+        run: |
+          VERSION="${{ steps.check.outputs.latest }}"
+          VERSION="${VERSION#v}"
+          TAG="v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -s -m "chore: update quickjs to ${TAG}"
+          git tag "$TAG"
+          git push origin HEAD "$TAG"
