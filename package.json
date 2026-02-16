@@ -1,6 +1,6 @@
 {
   "name": "quickjs-wasi-reactor",
-  "version": "0.0.11",
+  "version": "0.12.1",
   "description": "JavaScript harness for QuickJS-NG WASI reactor model",
   "type": "module",
   "main": "./dist/index.js",
