@@ -8,11 +8,9 @@ This package provides a JavaScript/TypeScript implementation for running QuickJS
 
 ## Related Projects
 
+- [QuickJS-NG](https://github.com/quickjs-ng/quickjs) - Upstream QuickJS-NG (includes WASI reactor build)
 - [go-quickjs-wasi-reactor](https://github.com/aperturerobotics/go-quickjs-wasi-reactor) - Go implementation with wazero
 - [go-quickjs-wasi](https://github.com/paralin/go-quickjs-wasi) - Go implementation for command model (blocking)
-- [paralin/quickjs](https://github.com/paralin/quickjs) - QuickJS-NG fork with reactor build target
-- [QuickJS-NG reactor PR](https://github.com/quickjs-ng/quickjs/pull/1308) - Upstream PR for reactor support
-- [QuickJS-NG event loop PR](https://github.com/quickjs-ng/quickjs/pull/1307) - Upstream PR for non-blocking event loop
 
 ## Installation
 
