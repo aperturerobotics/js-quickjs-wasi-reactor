@@ -17,11 +17,11 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2.1.2
       - run: bun install
       - run: bun run build
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: '25'
           registry-url: 'https://registry.npmjs.org'
@@ -32,8 +32,52 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+
+          # Parse version and download URL from src/version.ts
+          QJS_VERSION=$(grep "VERSION = " src/version.ts | sed "s/.*'\(.*\)'/\1/")
+          DOWNLOAD_URL=$(grep "DOWNLOAD_URL = " src/version.ts | sed "s/.*'\(.*\)'/\1/")
+
+          # Derive upstream release URL from download URL
+          # https://github.com/quickjs-ng/quickjs/releases/download/v0.12.1/file.wasm
+          #   -> https://github.com/quickjs-ng/quickjs/releases/tag/v0.12.1
+          QJS_RELEASE_URL=$(echo "$DOWNLOAD_URL" | sed 's|/releases/download/\([^/]*\)/.*|/releases/tag/\1|')
+
+          # Find the previous tag
+          PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${TAG}$" | head -n1)
+
+          # Build changelog from commits since previous tag
+          if [ -n "$PREV_TAG" ]; then
+            CHANGES=$(git log "${PREV_TAG}..${TAG}" --pretty=format:"- %s" --no-merges)
+          else
+            CHANGES=$(git log "${TAG}" --pretty=format:"- %s" --no-merges)
+          fi
+
+          # Write release body
+          cat > /tmp/release-notes.md <<EOF
+          Update to QuickJS-NG ${QJS_VERSION}
+
+          ## Changes
+
+          ${CHANGES}
+
+          ## QuickJS Release
+
+          ${QJS_RELEASE_URL}
+          EOF
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create ${{ github.ref_name }} --generate-notes
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file /tmp/release-notes.md
