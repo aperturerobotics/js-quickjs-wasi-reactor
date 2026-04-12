@@ -2,7 +2,7 @@
 // Do not edit manually
 
 /** QuickJS-NG version string */
-export const VERSION = 'v0.13.0'
+export const VERSION = 'v0.14.0'
 
 /** Download URL for the WASM binary */
-export const DOWNLOAD_URL = 'https://github.com/quickjs-ng/quickjs/releases/download/v0.13.0/qjs-wasi-reactor.wasm'
+export const DOWNLOAD_URL = 'https://github.com/quickjs-ng/quickjs/releases/download/v0.14.0/qjs-wasi-reactor.wasm'
