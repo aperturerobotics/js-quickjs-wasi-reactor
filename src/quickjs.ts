@@ -75,6 +75,8 @@ export interface QuickJSOptions {
   stderr?: (line: string) => void;
   /** Virtual filesystem root contents */
   fs?: Map<string, File | Directory>;
+  /** Additional preopened file descriptors */
+  preopens?: Fd[];
   /** Handler for data written to /dev/out */
   onDevOut?: (data: Uint8Array) => void;
   /** Custom stdin that data can be pushed to */
@@ -123,6 +125,10 @@ export class QuickJS {
       stderr, // fd 2 - stderr
       rootDir, // fd 3 - preopened /
     ];
+
+    for (const preopen of options.preopens ?? []) {
+      fds.push(preopen);
+    }
 
     // Add /dev directory with /dev/out if onDevOut is provided
     if (options.onDevOut) {

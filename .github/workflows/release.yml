@@ -21,11 +21,16 @@ jobs:
       - uses: oven-sh/setup-bun@3d267786b128fe76c2f16a390aa2448b815359f3 # v2.1.2
       - run: bun install
       - run: bun run build
+      - name: Verify package version matches tag
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          VERSION="$(node -p "require('./package.json').version")"
+          test "$VERSION" = "$TAG"
       - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
           node-version: '25'
           registry-url: 'https://registry.npmjs.org'
-      - run: npm publish
+      - run: npm publish --provenance
 
   github-release:
     runs-on: ubuntu-latest

@@ -2,7 +2,12 @@ import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createQuickJS, buildFileSystem } from "./quickjs.js";
-import { PollableStdin } from "./fs-mem.js";
+import {
+  File,
+  PollableStdin,
+  PreopenDirectory,
+  createReadOnlyMapMount,
+} from "./fs-mem.js";
 
 // Load the WASM module once for all tests
 const wasmPath = join(import.meta.dirname, "..", "qjs-wasi.wasm");
@@ -86,6 +91,59 @@ describe("QuickJS", () => {
     qjs.destroy();
 
     expect(output.some((line) => line.includes("file content here"))).toBe(
+      true,
+    );
+  });
+
+  it("should support additional preopened directories", () => {
+    const output: string[] = [];
+    const preopen = new PreopenDirectory(
+      "/extra",
+      new Map([
+        [
+          "message.txt",
+          new File(new TextEncoder().encode("hello from preopen")),
+        ],
+      ]),
+    );
+
+    const qjs = createQuickJS(wasmModule, {
+      stdout: (line) => output.push(line),
+      preopens: [preopen],
+    });
+    qjs.init(["qjs", "--std"]);
+    qjs.eval(`
+      const content = std.loadFile("/extra/message.txt");
+      console.log("Preopen:", content);
+    `);
+    qjs.runLoopSync();
+    qjs.destroy();
+
+    expect(output.some((line) => line.includes("hello from preopen"))).toBe(
+      true,
+    );
+  });
+
+  it("should support read-only map mount preopens", () => {
+    const output: string[] = [];
+    const preopen = createReadOnlyMapMount(
+      "/assets",
+      new Map([["nested/message.txt", "hello from mounted assets"]]),
+    );
+
+    const qjs = createQuickJS(wasmModule, {
+      stdout: (line) => output.push(line),
+      preopens: [preopen],
+    });
+    qjs.init(["qjs", "--std"]);
+    qjs.eval(`
+      const content = std.loadFile("/assets/nested/message.txt");
+      console.log("Mounted:", content);
+    `);
+    qjs.runLoopSync();
+    qjs.destroy();
+
+    expect(output.some((line) => line.includes("hello from mounted assets"))).toBe(
       true,
     );
   });
@@ -181,6 +239,81 @@ describe("QuickJS", () => {
     qjs.destroy();
 
     expect(output).toContain("Hi World");
+  });
+
+  it("should support static import from read-only mount preopens", () => {
+    const output: string[] = [];
+    const preopen = createReadOnlyMapMount(
+      "/assets",
+      new Map([
+        ["utils.js", `export function greet(name) { return "Hi " + name; }`],
+      ]),
+    );
+
+    const qjs = createQuickJS(wasmModule, {
+      stdout: (line) => output.push(line),
+      preopens: [preopen],
+    });
+    qjs.init(["qjs", "--std"]);
+    qjs.eval(
+      `
+      import { greet } from '/assets/utils.js';
+      console.log(greet("Mount"));
+    `,
+      true,
+    );
+    qjs.runLoopSync();
+    qjs.destroy();
+
+    expect(output).toContain("Hi Mount");
+  });
+
+  it("should support dynamic import from read-only mount preopens", async () => {
+    const output: string[] = [];
+    const preopen = createReadOnlyMapMount(
+      "/assets",
+      new Map([
+        ["lib.js", `export const greeting = "Hello from mount import!";`],
+      ]),
+    );
+
+    const qjs = createQuickJS(wasmModule, {
+      stdout: (line) => output.push(line),
+      preopens: [preopen],
+    });
+    qjs.init(["qjs", "--std"]);
+    qjs.eval(
+      `
+      async function main() {
+        const lib = await import('/assets/lib.js');
+        console.log(lib.greeting);
+      }
+      main();
+    `,
+      true,
+    );
+    await qjs.runLoop();
+    qjs.destroy();
+
+    expect(output).toContain("Hello from mount import!");
+  });
+
+  it("should support device preopens", () => {
+    const output: Uint8Array[] = [];
+    const qjs = createQuickJS(wasmModule, {
+      onDevOut: (data) => output.push(data),
+    });
+
+    qjs.init(["qjs", "--std"]);
+    qjs.eval(`
+      const f = std.open("/dev/out", "w");
+      f.puts("device output");
+      f.close();
+    `);
+    qjs.runLoopSync();
+    qjs.destroy();
+
+    expect(new TextDecoder().decode(output[0])).toBe("device output");
   });
 });
 

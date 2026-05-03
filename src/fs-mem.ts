@@ -445,6 +445,232 @@ export class PreopenDirectory extends OpenDirectory {
   }
 }
 
+export interface ReadOnlyFileMountFile {
+  size: bigint;
+  readAt(offset: bigint, size: number): Uint8Array;
+}
+
+export interface ReadOnlyFileMount {
+  getFile(path: string): ReadOnlyFileMountFile | null;
+}
+
+export class OpenReadOnlyMountFile extends Fd {
+  file: ReadOnlyFileMountFile;
+  file_pos: bigint = 0n;
+  private readonly ino: bigint;
+
+  constructor(file: ReadOnlyFileMountFile, ino: bigint) {
+    super();
+    this.file = file;
+    this.ino = ino;
+  }
+
+  fd_fdstat_get(): { ret: number; fdstat: wasi.Fdstat | null } {
+    return { ret: 0, fdstat: new wasi.Fdstat(wasi.FILETYPE_REGULAR_FILE, 0) };
+  }
+
+  fd_filestat_get(): { ret: number; filestat: wasi.Filestat } {
+    return {
+      ret: 0,
+      filestat: new wasi.Filestat(
+        this.ino,
+        wasi.FILETYPE_REGULAR_FILE,
+        this.file.size,
+      ),
+    };
+  }
+
+  fd_read(size: number): { ret: number; data: Uint8Array } {
+    const data = this.file.readAt(this.file_pos, size);
+    this.file_pos += BigInt(data.byteLength);
+    return { ret: 0, data };
+  }
+
+  fd_pread(size: number, offset: bigint): { ret: number; data: Uint8Array } {
+    return { ret: 0, data: this.file.readAt(offset, size) };
+  }
+
+  fd_seek(offset: bigint, whence: number): { ret: number; offset: bigint } {
+    let calculated_offset: bigint;
+    switch (whence) {
+      case wasi.WHENCE_SET:
+        calculated_offset = offset;
+        break;
+      case wasi.WHENCE_CUR:
+        calculated_offset = this.file_pos + offset;
+        break;
+      case wasi.WHENCE_END:
+        calculated_offset = this.file.size + offset;
+        break;
+      default:
+        return { ret: wasi.ERRNO_INVAL, offset: 0n };
+    }
+
+    if (calculated_offset < 0) {
+      return { ret: wasi.ERRNO_INVAL, offset: 0n };
+    }
+
+    this.file_pos = calculated_offset;
+    return { ret: 0, offset: this.file_pos };
+  }
+
+  fd_tell(): { ret: number; offset: bigint } {
+    return { ret: 0, offset: this.file_pos };
+  }
+
+  fd_write(_data: Uint8Array): { ret: number; nwritten: number } {
+    return { ret: wasi.ERRNO_BADF, nwritten: 0 };
+  }
+
+  fd_pwrite(
+    _data: Uint8Array,
+    _offset: bigint,
+  ): { ret: number; nwritten: number } {
+    return { ret: wasi.ERRNO_BADF, nwritten: 0 };
+  }
+}
+
+export class ReadOnlyMountDirectory extends Fd {
+  private readonly mount: ReadOnlyFileMount;
+  private readonly prestat_name: string;
+  private readonly ino: bigint;
+  private readonly inodeByPath = new Map<string, bigint>();
+
+  constructor(name: string, mount: ReadOnlyFileMount) {
+    super();
+    this.mount = mount;
+    this.prestat_name = name;
+    this.ino = Inode.issue_ino();
+  }
+
+  fd_fdstat_get(): { ret: number; fdstat: wasi.Fdstat | null } {
+    return { ret: 0, fdstat: new wasi.Fdstat(wasi.FILETYPE_DIRECTORY, 0) };
+  }
+
+  fd_filestat_get(): { ret: number; filestat: wasi.Filestat } {
+    return {
+      ret: 0,
+      filestat: new wasi.Filestat(this.ino, wasi.FILETYPE_DIRECTORY, 0n),
+    };
+  }
+
+  fd_prestat_get(): { ret: number; prestat: wasi.Prestat | null } {
+    return { ret: 0, prestat: wasi.Prestat.dir(this.prestat_name) };
+  }
+
+  path_filestat_get(
+    _flags: number,
+    path: string,
+  ): { ret: number; filestat: wasi.Filestat | null } {
+    const normalized = normalizeMountPath(path);
+    if (normalized == null) {
+      return { ret: wasi.ERRNO_NOTCAPABLE, filestat: null };
+    }
+    if (normalized === "") {
+      return {
+        ret: 0,
+        filestat: new wasi.Filestat(this.ino, wasi.FILETYPE_DIRECTORY, 0n),
+      };
+    }
+    const file = this.mount.getFile(normalized);
+    if (file == null) {
+      return { ret: wasi.ERRNO_NOENT, filestat: null };
+    }
+    return {
+      ret: 0,
+      filestat: new wasi.Filestat(
+        this.inoForPath(normalized),
+        wasi.FILETYPE_REGULAR_FILE,
+        file.size,
+      ),
+    };
+  }
+
+  path_open(
+    _dirflags: number,
+    path: string,
+    oflags: number,
+    fs_rights_base: bigint,
+    _fs_rights_inheriting: bigint,
+    fd_flags: number,
+  ): { ret: number; fd_obj: Fd | null } {
+    const normalized = normalizeMountPath(path);
+    if (normalized == null) {
+      return { ret: wasi.ERRNO_NOTCAPABLE, fd_obj: null };
+    }
+    if (normalized === "") {
+      return { ret: wasi.ERRNO_SUCCESS, fd_obj: this };
+    }
+    if ((oflags & wasi.OFLAGS_DIRECTORY) === wasi.OFLAGS_DIRECTORY) {
+      return { ret: wasi.ERRNO_NOTDIR, fd_obj: null };
+    }
+    if (
+      (fs_rights_base & BigInt(wasi.RIGHTS_FD_WRITE)) ===
+      BigInt(wasi.RIGHTS_FD_WRITE)
+    ) {
+      return { ret: wasi.ERRNO_PERM, fd_obj: null };
+    }
+    const file = this.mount.getFile(normalized);
+    if (file == null) {
+      return { ret: wasi.ERRNO_NOENT, fd_obj: null };
+    }
+    const fd = new OpenReadOnlyMountFile(file, this.inoForPath(normalized));
+    if (fd_flags & wasi.FDFLAGS_APPEND) {
+      fd.fd_seek(0n, wasi.WHENCE_END);
+    }
+    return { ret: wasi.ERRNO_SUCCESS, fd_obj: fd };
+  }
+
+  private inoForPath(path: string): bigint {
+    const existing = this.inodeByPath.get(path);
+    if (existing != null) {
+      return existing;
+    }
+    const ino = Inode.issue_ino();
+    this.inodeByPath.set(path, ino);
+    return ino;
+  }
+}
+
+export function createReadOnlyMount(
+  name: string,
+  mount: ReadOnlyFileMount,
+): ReadOnlyMountDirectory {
+  return new ReadOnlyMountDirectory(name, mount);
+}
+
+export function createReadOnlyMapMount(
+  name: string,
+  files: Map<string, string | Uint8Array>,
+): ReadOnlyMountDirectory {
+  const enc = new TextEncoder();
+  const data = new Map<string, Uint8Array>();
+  for (const [path, content] of files) {
+    const normalized = normalizeMountPath(path);
+    if (normalized == null || normalized === "") {
+      continue;
+    }
+    data.set(
+      normalized,
+      typeof content === "string" ? enc.encode(content) : content,
+    );
+  }
+  return createReadOnlyMount(name, {
+    getFile(path) {
+      const file = data.get(path);
+      if (file == null) {
+        return null;
+      }
+      return {
+        size: BigInt(file.byteLength),
+        readAt(offset, size) {
+          return file.slice(Number(offset), Number(offset) + size);
+        },
+      };
+    },
+  });
+}
+
 export class File extends Inode {
   data: Uint8Array;
   readonly: boolean;
@@ -484,6 +710,26 @@ export class File extends Inode {
   stat(): wasi.Filestat {
     return new wasi.Filestat(this.ino, wasi.FILETYPE_REGULAR_FILE, this.size);
   }
+}
+
+function normalizeMountPath(path: string): string | null {
+  if (path.includes("\0")) {
+    return null;
+  }
+  const parts: string[] = [];
+  for (const part of path.split("/")) {
+    if (part === "" || part === ".") {
+      continue;
+    }
+    if (part === "..") {
+      if (parts.pop() == null) {
+        return null;
+      }
+      continue;
+    }
+    parts.push(part);
+  }
+  return parts.join("/");
 }
 
 class Path {

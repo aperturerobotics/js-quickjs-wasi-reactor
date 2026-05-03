@@ -89,6 +89,39 @@ await qjs.runLoop();
 qjs.destroy();
 ```
 
+### With Additional Preopened Mounts
+
+Use `preopens` when QuickJS needs extra WASI roots in addition to `/`.
+`createReadOnlyMapMount` is the simplest helper for immutable file trees, and
+`createReadOnlyMount` accepts a caller-provided synchronous file lookup for
+on-demand mounts.
+
+```typescript
+import { loadQuickJS, createReadOnlyMapMount } from "quickjs-wasi-reactor";
+
+const assets = createReadOnlyMapMount(
+  "/assets",
+  new Map([
+    ["lib.js", 'export const greeting = "Hello from a preopen"'],
+  ]),
+);
+
+const qjs = await loadQuickJS("/path/to/qjs-wasi.wasm", {
+  preopens: [assets],
+});
+
+qjs.init(["qjs", "--std"]);
+qjs.eval(
+  `
+  import { greeting } from '/assets/lib.js'
+  console.log(greeting)
+`,
+  true,
+);
+await qjs.runLoop();
+qjs.destroy();
+```
+
 ### Custom I/O Handlers
 
 ```typescript
@@ -223,6 +256,7 @@ Create a QuickJS instance from a pre-compiled WebAssembly module.
 | `stdout`   | `(line: string) => void`     | `console.log`         | Custom stdout line handler        |
 | `stderr`   | `(line: string) => void`     | `console.error`       | Custom stderr line handler        |
 | `fs`       | `Map<string, File\|Dir>`     | `new Map()`           | Virtual filesystem root contents  |
+| `preopens` | `Fd[]`                       | `[]`                  | Additional preopened WASI roots   |
 | `onDevOut` | `(data: Uint8Array) => void` | `undefined`           | Handler for /dev/out writes       |
 | `stdin`    | `PollableStdin`              | `new PollableStdin()` | Custom stdin source               |
 
