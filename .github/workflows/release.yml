@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: '25'
           registry-url: 'https://registry.npmjs.org'
-      - run: npm publish --provenance
+      - run: npm publish --provenance --tag rev
 
   github-release:
     runs-on: ubuntu-latest
@@ -83,6 +83,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --notes-file /tmp/release-notes.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "$TAG" \
+              --notes-file /tmp/release-notes.md
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file /tmp/release-notes.md
+          fi
