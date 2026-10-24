@@ -580,10 +580,7 @@ export class WASI {
           const path = new TextDecoder("utf-8").decode(
             buffer8.slice(path_ptr, path_ptr + path_len),
           );
-          const { ret, filestat } = this.fds[fd].path_filestat_get(
-            flags,
-            path,
-          );
+          const { ret, filestat } = this.fds[fd].path_filestat_get(flags, path);
           if (filestat != null) {
             filestat.write_bytes(buffer, filestat_ptr);
           }
@@ -755,11 +752,7 @@ export class WASI {
           if (inode_obj == null) {
             return unlinkRet;
           }
-          const linkRet = this.fds[new_fd].path_link(
-            new_path,
-            inode_obj,
-            true,
-          );
+          const linkRet = this.fds[new_fd].path_link(new_path, inode_obj, true);
           if (linkRet != wasi.ERRNO_SUCCESS) {
             if (
               this.fds[fd].path_link(old_path, inode_obj, true) !=
