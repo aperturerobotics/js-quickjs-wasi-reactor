@@ -143,9 +143,9 @@ describe("QuickJS", () => {
     qjs.runLoopSync();
     qjs.destroy();
 
-    expect(output.some((line) => line.includes("hello from mounted assets"))).toBe(
-      true,
-    );
+    expect(
+      output.some((line) => line.includes("hello from mounted assets")),
+    ).toBe(true);
   });
 
   it("should capture stderr separately", () => {

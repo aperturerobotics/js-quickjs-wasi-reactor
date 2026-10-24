@@ -25,7 +25,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsrs --noEmit",
-    "lint": "eslint ./src",
+    "lint": "oxlint src",
     "format": "prettier --write src",
     "update-wasm": "./update-quickjs.bash",
     "release": "npm run release:version && npm run release:commit",
@@ -53,14 +53,11 @@
   },
   "homepage": "https://github.com/aperturerobotics/js-quickjs-wasi-reactor#readme",
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
     "@types/node": "^26.0.0",
-    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
-    "eslint": "^10.0.0",
-    "eslint-config-prettier": "^10.1.8",
+    "oxlint": "^1.76.0",
     "prettier": "^3.8.1",
+    "tsrs": "0.18.0-ts7.1.0-dev.20260929",
     "typescript": "^7.0.0",
-    "typescript-eslint": "^8.55.0",
     "vitest": "^5.0.0"
   }
 }
