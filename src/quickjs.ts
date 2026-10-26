@@ -154,8 +154,12 @@ export class QuickJS {
 
   /** Allocate a null-terminated string in WASM memory */
   private allocString(s: string): number {
+    return this.allocBytes(new TextEncoder().encode(s));
+  }
+
+  /** Allocate null-terminated bytes in WASM memory */
+  private allocBytes(bytes: Uint8Array): number {
     if (!this.exports) throw new Error("QuickJS not initialized");
-    const bytes = new TextEncoder().encode(s);
     const ptr = this.exports.malloc(bytes.length + 1);
     if (ptr === 0) throw new Error("malloc failed");
     const memory = new Uint8Array(this.exports.memory.buffer);
@@ -250,8 +254,9 @@ export class QuickJS {
       throw new Error("QuickJS not initialized");
     }
 
-    // Allocate code string (with null terminator)
-    const codePtr = this.allocString(code);
+    // Allocate the UTF-8 code (with null terminator)
+    const codeBytes = new TextEncoder().encode(code);
+    const codePtr = this.allocBytes(codeBytes);
 
     // Allocate filename string
     const filenamePtr = this.allocString(filename);
@@ -263,7 +268,7 @@ export class QuickJS {
     const result = this.exports.JS_Eval(
       this.ctxPtr,
       codePtr,
-      code.length,
+      codeBytes.length,
       filenamePtr,
       evalFlags,
     );

@@ -34,6 +34,18 @@ describe("QuickJS", () => {
     expect(output).toContain("Hello, World!");
   });
 
+  it("should evaluate code with non-ASCII characters", () => {
+    const output: string[] = [];
+    const qjs = createQuickJS(wasmModule, {
+      stdout: (line) => output.push(line),
+    });
+    qjs.init();
+    qjs.eval(`console.log("héllo, 世界", 1 + 1)`);
+    qjs.destroy();
+
+    expect(output).toEqual(["héllo, 世界 2"]);
+  });
+
   it("should handle timers", async () => {
     const output: string[] = [];
     const qjs = createQuickJS(wasmModule, {
