@@ -316,6 +316,18 @@ Push data to stdin for the QuickJS instance to read.
 
 Check if stdin has data available.
 
+#### `setInterruptBudget(checks)`
+
+Set the number of interrupt checks the runtime may pass before it throws an
+uncatchable `interrupted` error, or `-1` for no limit. QuickJS checks every
+10000 bytecode branches and calls, so the budget bounds a run by a count of
+operations that is the same on every host.
+
+#### `getInterruptBudget()`
+
+Get the interrupt checks left: `0n` once the budget interrupted a run, `-1n`
+when unlimited.
+
 #### `stop()`
 
 Stop the event loop.
@@ -336,6 +348,13 @@ const fs = buildFileSystem(
   ]),
 );
 ```
+
+## Building the WASM file
+
+`./update-quickjs.bash [tag]` builds the reactor from a QuickJS-NG release
+with wasi-sdk and an 8 MiB stack, after applying each patch in `patches/`. The
+patches add the interrupt budget exports and are kept on the
+`wasi-reactor-interrupt-budget` branch of `paralin/quickjs`.
 
 ## Reactor Model
 

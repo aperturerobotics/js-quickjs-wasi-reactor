@@ -46,14 +46,9 @@ jobs:
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
 
-          # Parse version and download URL from src/version.ts
-          QJS_VERSION=$(grep "VERSION = " src/version.ts | sed "s/.*'\(.*\)'/\1/")
-          DOWNLOAD_URL=$(grep "DOWNLOAD_URL = " src/version.ts | sed "s/.*'\(.*\)'/\1/")
-
-          # Derive upstream release URL from download URL
-          # https://github.com/quickjs-ng/quickjs/releases/download/v0.12.1/file.wasm
-          #   -> https://github.com/quickjs-ng/quickjs/releases/tag/v0.12.1
-          QJS_RELEASE_URL=$(echo "$DOWNLOAD_URL" | sed 's|/releases/download/\([^/]*\)/.*|/releases/tag/\1|')
+          # Parse the version and source tree from src/version.ts
+          QJS_VERSION=$(grep "^export const VERSION = " src/version.ts | sed 's/.*"\(.*\)".*/\1/')
+          QJS_SOURCE_URL=$(grep "^export const SOURCE_URL = " src/version.ts | sed 's/.*"\(.*\)".*/\1/')
 
           # Find the previous tag
           PREV_TAG=$(git tag --sort=-v:refname | grep -v "^${TAG}$" | head -n1)
@@ -73,9 +68,9 @@ jobs:
 
           ${CHANGES}
 
-          ## QuickJS Release
+          ## QuickJS Source
 
-          ${QJS_RELEASE_URL}
+          ${QJS_SOURCE_URL}, with the patches in patches/ applied
           EOF
 
       - name: Create GitHub Release

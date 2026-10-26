@@ -46,6 +46,51 @@ describe("QuickJS", () => {
     expect(output).toEqual(["héllo, 世界 2"]);
   });
 
+  it("should stop a run past its interrupt budget", () => {
+    const loop = (n: number) =>
+      `let n = 0; for (let i = 0; i < ${n}; i++) { n += i; } console.log(n);`;
+    const newInstance = (checks: number) => {
+      const output: string[] = [];
+      const qjs = createQuickJS(wasmModule, {
+        stdout: (line) => output.push(line),
+        stderr: (line) => output.push(line),
+      });
+      qjs.init();
+      qjs.setInterruptBudget(checks);
+      return { qjs, output };
+    };
+
+    // A short loop passes within the budget.
+    const short = newInstance(100);
+    short.qjs.eval(loop(1000));
+    const left = short.qjs.getInterruptBudget();
+    expect(left > 0n && left <= 100n).toBe(true);
+    short.qjs.destroy();
+
+    // An endless loop stops with the budget spent, even inside try.
+    const endless = newInstance(100);
+    expect(() =>
+      endless.qjs.eval(
+        `try { for (;;) {} } catch (e) { console.log("caught"); }`,
+      ),
+    ).toThrow();
+    expect(endless.output).not.toContain("caught");
+    expect(endless.qjs.getInterruptBudget()).toBe(0n);
+    endless.qjs.destroy();
+
+    // The same work spends the same budget in a fresh instance.
+    const spent = () => {
+      const run = newInstance(1 << 20);
+      run.qjs.eval(loop(1000000));
+      const left = run.qjs.getInterruptBudget();
+      run.qjs.destroy();
+      return BigInt(1 << 20) - left;
+    };
+    const first = spent();
+    expect(first > 0n).toBe(true);
+    expect(spent()).toBe(first);
+  });
+
   it("should handle timers", async () => {
     const output: string[] = [];
     const qjs = createQuickJS(wasmModule, {

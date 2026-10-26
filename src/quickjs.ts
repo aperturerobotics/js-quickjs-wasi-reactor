@@ -39,6 +39,10 @@ export interface QuickJSReactorExports {
   qjs_init_argv(argc: number, argv: number): number;
   qjs_get_context(): number;
   qjs_destroy(): void;
+  /** Set the interrupt checks left before an uncatchable interrupt, -1 for none */
+  qjs_set_interrupt_budget(checks: bigint): number;
+  /** Interrupt checks left, 0 once the budget interrupted a run, -1 if unlimited */
+  qjs_get_interrupt_budget(): bigint;
 
   // Core runtime (low-level, use qjs_init_argv instead)
   JS_GetRuntime(ctx: number): number;
@@ -440,6 +444,31 @@ export class QuickJS {
     }
 
     return this.exitCode;
+  }
+
+  /**
+   * Set the number of interrupt checks the runtime may pass before it throws
+   * an uncatchable "interrupted" error, or -1 for no limit. QuickJS checks
+   * every 10000 bytecode branches and calls, so the budget bounds a run by a
+   * count of operations that is the same on every host.
+   * @param checks Interrupt checks allowed, or -1 for no limit
+   */
+  setInterruptBudget(checks: number | bigint): void {
+    if (!this.exports || this.ctxPtr === 0) {
+      throw new Error("QuickJS not initialized");
+    }
+    if (this.exports.qjs_set_interrupt_budget(BigInt(checks)) !== 0) {
+      throw new Error("qjs_set_interrupt_budget failed");
+    }
+  }
+
+  /**
+   * Get the interrupt checks left in the budget, 0 once the budget
+   * interrupted a run, or -1 when the budget is unlimited.
+   */
+  getInterruptBudget(): bigint {
+    if (!this.exports) throw new Error("QuickJS not initialized");
+    return this.exports.qjs_get_interrupt_budget();
   }
 
   /**
