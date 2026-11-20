@@ -1,5 +1,24 @@
-// QuickJS WASI Reactor harness for JavaScript
-// This module provides a high-level API for running QuickJS in reactor mode.
+/**
+ * Runs the QuickJS-NG WASI reactor in a browser, Node.js or Bun, with WASI
+ * served from memory.
+ *
+ * A QuickJS instance owns one WebAssembly instance and one JavaScript
+ * context. Its lifecycle is createQuickJS or loadQuickJS, then init with
+ * qjs-style arguments, then eval calls, then destroy. Before init, eval, the
+ * loop and setInterruptBudget throw, and init throws on a second call.
+ *
+ * The host drives the event loop. runLoop steps it, yields to the host's
+ * event loop between microtask batches, sleeps until the next timer, and
+ * resolves with the exit code when no work remains or stop is called.
+ * runLoopSync steps it without yielding and returns as soon as only a timer
+ * is pending, so its caller must call it again when the timer is due. Either
+ * loop polls stdin when pushStdin has queued data; a host that waits for
+ * input itself registers onStdinWake and calls loopOnce and pollIO.
+ *
+ * The filesystem the script sees is the in-memory tree in QuickJSOptions.fs,
+ * which buildFileSystem builds from a map of paths, plus any extra preopens.
+ * When onDevOut is set, the tree gains /dev/out, whose writes go to it.
+ */
 
 import { WASI, WASIProcExit } from "./wasi.js";
 import {
